@@ -1,44 +1,69 @@
 from cvxpy import *
 import numpy as np
 
-n = 50
-D = 4
+n = 50 #Order of taylor expansion
+D = 4 #Dimension of ambient spacetime
+N_constr = 200 #Number of points on the circle at which constraints are applied
+
 alpha2 = (D-26)/384/np.pi
 beta3 = 0
 
-c4 = Variable()
-an, bn, cn = Variable(n-5), Variable(n-5), Variable(n-5)
+an, bn, cn = Variable(n), Variable(n), Variable(n)
+ns = np.arange(n)
 
-a04 = [0,0,0,-alpha2,-beta3]
-b04 = [0,0,0,0,0]
-c03 = [0,1,0.25,0]
+#Coeffs in s plane in terms of coeffs in \chi plane
+a0_t, b0_t = sum(an), sum(bn)
 
+a1_t, b1_t = sum(-ns/2*bn), sum(ns/2*an)
 
-def sigma_1(s, an, bn, cn):
-    sn = [s**n for n in range(5,n)]
-    return sum((an+1j*bn)*sn) + np.dot(a04, np.array((1,s,s**2,s**3,s**4)))
+a2_t, b2_t = sum(-ns**2/8*an), sum(-ns**2/8*bn)
 
-def sigma_2(s, an, bn, cn):
-    sn = [s**n for n in range(5,n)]
-    return sum(cn*sn) + np.dot(c03, np.array((1,s,s**2,s**3))) + c4*s**4
+a3_t, b3_t = sum(ns*(2*ns**2+1)/96*bn), sum(-ns*(2*ns**2+1)/96*an)
 
-def sigma_3(s, an, bn, cn):
-    s = -s
-    sn = [s**n for n in range(5,n)]
-    return sum((an-1j*bn)*sn) + np.dot(a04, np.array((1,s,s**2,s**3,s**4)))
+c0_t = sum(cn)
 
-def sigma_sing(s, an, bn, cn, D=4):
-    return (D-2)*sigma_1(s,an,bn,cn) + sigma_2(s,an,bn,cn) + sigma_3(s,an,bn,cn)
+c1_t_by_i = sum(ns/2*cn) #c1_t/1j
 
-def sigma_sym(s, an, bn, cn, D=4):
-    return sigma_2(s,an,bn,cn) + sigma_3(s,an,bn,cn)
+c2_t = sum(-ns**2/8*cn)
 
-def sigma_anti(s, an, bn, cn, D=4):
-    return sigma_2(s,an,bn,cn) - sigma_3(s,an,bn,cn)
+c3_t_by_i = sum(-ns*(2*ns**2+1)/96*cn) #c3_t/1j
 
-objective = Minimize(c4 - 2*beta3)
-constraints = [1 >= abs(sigma_sing(-4*1j*(np.exp(1j*x)-1)/(np.exp(1j*x)+1), an, bn, cn, D)) for x in np.linspace(0,np.pi,100,endpoint=False)] \
-               + [1 >= abs(sigma_sym(-4*1j*(np.exp(1j*x)-1)/(np.exp(1j*x)+1), an, bn, cn, D)) for x in np.linspace(0,np.pi,100,endpoint=False)] \
-               + [1 >= abs(sigma_anti(-4*1j*(np.exp(1j*x)-1)/(np.exp(1j*x)+1), an, bn, cn, D)) for x in np.linspace(0,np.pi,100,endpoint=False)]
+def sigma_1(chi, an, bn, cn):
+    ch = chi**ns
+    return sum((an+1j*bn)*ch)
+
+def sigma_2(chi, an, bn, cn):
+    ch = chi**ns
+    return sum(cn*ch)
+
+def sigma_3(chi, an, bn, cn):
+    ch = chi**ns
+    return sum((an-1j*bn)*ch)
+
+def sigma_sing(chi, an, bn, cn, D=4):
+    return (D-2)*sigma_1(chi,an,bn,cn) + sigma_2(chi,an,bn,cn) + sigma_3(chi,an,bn,cn)
+
+def sigma_sym(chi, an, bn, cn, D=4):
+    return sigma_2(chi,an,bn,cn) + sigma_3(chi,an,bn,cn)
+
+def sigma_anti(chi, an, bn, cn, D=4):
+    return sigma_2(chi,an,bn,cn) - sigma_3(chi,an,bn,cn)
+
+alpha3 = c3_t_by_i - beta3
+objective = Minimize(alpha3)
+
+def cheby_pts(n):
+    k = np.arange(n)
+    return np.cos(np.pi*(2*k+1)/(2*n+2))
+constr_pts = (cheby_pts(N_constr)+1)*np.pi/2
+# constr_pts = np.linspace(0, np.pi, N_constr, endpoint=False)
+
+constraints = [a0_t == 0, b0_t == 0, a1_t == 0, b1_t ==0, a2_t == 0, b2_t == -alpha2, a3_t == alpha2/4] \
+               + [b3_t == -beta3, c0_t == 1, c1_t_by_i == 0.25, c2_t == -1/32] \
+               + [(abs(sigma_sing(np.exp(1j*x), an, bn, cn, D)) <= 1) for x in constr_pts] \
+               + [(abs(sigma_sym(np.exp(1j*x), an, bn, cn, D)) <= 1) for x in constr_pts] \
+               + [(abs(sigma_anti(np.exp(1j*x), an, bn, cn, D)) <= 1) for x in constr_pts]
+
 prob = Problem(objective, constraints)
-prob.solve(verbose=True)
+prob.solve(solver=GUROBI, BarQCPConvTol=1e-50, verbose=True)
+# prob.solve(solver=ECOS, verbose=True)
